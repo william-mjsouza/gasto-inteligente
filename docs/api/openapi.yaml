@@ -1,0 +1,467 @@
+openapi: 3.1.0
+info:
+  title: Gasto Inteligente API
+  version: 0.2.0
+  description: |
+    API do MVP de previsão financeira familiar. Etapa 2 — Acesso.
+
+    - Autenticação por sessão no servidor (cookie `JSESSIONID`, HttpOnly). Sem JWT.
+    - Operações mutáveis exigem o cabeçalho CSRF obtido em `GET /api/v1/auth/csrf`.
+    - O `familyId` vem sempre da sessão; propriedades desconhecidas no corpo são rejeitadas (400).
+    - Recursos de outra família respondem 404.
+    - Valores decimais trafegam como string com ponto (por exemplo, `"10.00"`).
+servers:
+  - url: /
+security:
+  - session: []
+tags:
+  - name: Auth
+  - name: Configuração
+  - name: Contas
+  - name: Membros
+paths:
+  /api/v1/auth/csrf:
+    get:
+      tags: [Auth]
+      summary: Token CSRF da sessão atual
+      security: []
+      responses:
+        '200':
+          description: Token e nome do cabeçalho
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/CsrfToken' }
+  /api/v1/auth/login:
+    post:
+      tags: [Auth]
+      summary: Login (processado pelo Spring Security)
+      description: Troca o identificador de sessão e renova o token CSRF, devolvido no corpo.
+      security: []
+      parameters:
+        - $ref: '#/components/parameters/Csrf'
+      requestBody:
+        required: true
+        content:
+          application/x-www-form-urlencoded:
+            schema:
+              type: object
+              required: [email, password]
+              properties:
+                email: { type: string }
+                password: { type: string, format: password }
+      responses:
+        '200':
+          description: Autenticado
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/LoginResponse' }
+        '401': { $ref: '#/components/responses/Error', description: 'INVALID_CREDENTIALS (mensagem genérica)' }
+        '403': { $ref: '#/components/responses/Error', description: CSRF_INVALID }
+        '429': { $ref: '#/components/responses/Error', description: TOO_MANY_ATTEMPTS }
+  /api/v1/auth/logout:
+    post:
+      tags: [Auth]
+      summary: Logout; invalida a sessão
+      security: []
+      parameters:
+        - $ref: '#/components/parameters/Csrf'
+      responses:
+        '204': { description: Sessão encerrada }
+        '403': { $ref: '#/components/responses/Error' }
+  /api/v1/auth/me:
+    get:
+      tags: [Auth]
+      summary: Usuário autenticado e sua família
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Me' }
+        '401': { $ref: '#/components/responses/Error' }
+  /api/v1/auth/password:
+    post:
+      tags: [Auth]
+      summary: Troca a própria senha
+      description: Outras sessões do usuário são revogadas; a sessão atual continua válida.
+      parameters:
+        - $ref: '#/components/parameters/Csrf'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [currentPassword, newPassword]
+              properties:
+                currentPassword: { type: string, format: password }
+                newPassword: { type: string, format: password, minLength: 12 }
+      responses:
+        '204': { description: Senha alterada }
+        '400': { $ref: '#/components/responses/Error' }
+        '401': { $ref: '#/components/responses/Error' }
+        '429': { $ref: '#/components/responses/Error' }
+  /api/v1/family/settings:
+    get:
+      tags: [Configuração]
+      summary: Configurações da família
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Settings' }
+    patch:
+      tags: [Configuração]
+      summary: Altera configurações (ADMIN e MEMBER)
+      parameters:
+        - $ref: '#/components/parameters/Csrf'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/SettingsPatch' }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Settings' }
+        '400': { $ref: '#/components/responses/Error' }
+        '409': { $ref: '#/components/responses/Error', description: VERSION_CONFLICT }
+  /api/v1/accounts:
+    get:
+      tags: [Contas]
+      summary: Lista contas e cartões da família
+      parameters:
+        - { name: kind, in: query, schema: { $ref: '#/components/schemas/AccountKind' } }
+        - $ref: '#/components/parameters/Page'
+        - $ref: '#/components/parameters/Size'
+        - name: sort
+          in: query
+          description: 'Campo e direção: name, createdAt, kind ou status; ex.: name,desc'
+          schema: { type: string }
+      responses:
+        '200':
+          description: Página de contas
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/AccountPage' }
+        '400': { $ref: '#/components/responses/Error' }
+    post:
+      tags: [Contas]
+      summary: Cadastra conta de caixa ou cartão
+      parameters:
+        - $ref: '#/components/parameters/Csrf'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [name, kind]
+              properties:
+                name: { type: string, maxLength: 100 }
+                kind: { $ref: '#/components/schemas/AccountKind' }
+      responses:
+        '201':
+          description: Criada
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Account' }
+        '400': { $ref: '#/components/responses/Error' }
+        '409': { $ref: '#/components/responses/Error', description: DUPLICATE_NAME }
+  /api/v1/accounts/{id}:
+    parameters:
+      - $ref: '#/components/parameters/Id'
+    get:
+      tags: [Contas]
+      summary: Detalhe da conta
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Account' }
+        '404': { $ref: '#/components/responses/Error' }
+    patch:
+      tags: [Contas]
+      summary: Renomeia, arquiva ou reativa
+      parameters:
+        - $ref: '#/components/parameters/Csrf'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [version]
+              properties:
+                name: { type: string, maxLength: 100 }
+                status: { $ref: '#/components/schemas/AccountStatus' }
+                version: { type: integer, format: int64 }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Account' }
+        '404': { $ref: '#/components/responses/Error' }
+        '409': { $ref: '#/components/responses/Error' }
+    delete:
+      tags: [Contas]
+      summary: Exclui conta sem vínculos
+      parameters:
+        - $ref: '#/components/parameters/Csrf'
+        - { name: version, in: query, required: true, schema: { type: integer, format: int64 } }
+      responses:
+        '204': { description: Excluída }
+        '404': { $ref: '#/components/responses/Error' }
+        '409': { $ref: '#/components/responses/Error' }
+  /api/v1/members:
+    get:
+      tags: [Membros]
+      summary: Lista membros (somente ADMIN)
+      parameters:
+        - $ref: '#/components/parameters/Page'
+        - $ref: '#/components/parameters/Size'
+        - { name: sort, in: query, description: 'createdAt, role ou status', schema: { type: string } }
+      responses:
+        '200':
+          description: Página de membros
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/MemberPage' }
+        '403': { $ref: '#/components/responses/Error' }
+    post:
+      tags: [Membros]
+      summary: Cria membro com senha inicial (somente ADMIN)
+      parameters:
+        - $ref: '#/components/parameters/Csrf'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [email, displayName, role, initialPassword]
+              properties:
+                email: { type: string, format: email }
+                displayName: { type: string, maxLength: 100 }
+                role: { $ref: '#/components/schemas/Role' }
+                initialPassword: { type: string, format: password, minLength: 12 }
+      responses:
+        '201':
+          description: Criado
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Member' }
+        '400': { $ref: '#/components/responses/Error' }
+        '403': { $ref: '#/components/responses/Error' }
+        '409': { $ref: '#/components/responses/Error', description: EMAIL_UNAVAILABLE }
+  /api/v1/members/{id}:
+    parameters:
+      - $ref: '#/components/parameters/Id'
+    get:
+      tags: [Membros]
+      summary: Detalhe do membro (somente ADMIN)
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Member' }
+        '403': { $ref: '#/components/responses/Error' }
+        '404': { $ref: '#/components/responses/Error' }
+    patch:
+      tags: [Membros]
+      summary: Altera papel ou situação (somente ADMIN)
+      description: Vale imediatamente para as sessões abertas do membro.
+      parameters:
+        - $ref: '#/components/parameters/Csrf'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [version]
+              properties:
+                role: { $ref: '#/components/schemas/Role' }
+                status: { $ref: '#/components/schemas/MemberStatus' }
+                version: { type: integer, format: int64 }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Member' }
+        '403': { $ref: '#/components/responses/Error' }
+        '404': { $ref: '#/components/responses/Error' }
+        '409': { $ref: '#/components/responses/Error', description: VERSION_CONFLICT ou LAST_ADMIN }
+  /api/v1/members/{id}/password:
+    post:
+      tags: [Membros]
+      summary: Redefine a senha do membro (somente ADMIN); revoga as sessões dele
+      parameters:
+        - $ref: '#/components/parameters/Id'
+        - $ref: '#/components/parameters/Csrf'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [newPassword]
+              properties:
+                newPassword: { type: string, format: password, minLength: 12 }
+      responses:
+        '204': { description: Senha redefinida }
+        '400': { $ref: '#/components/responses/Error' }
+        '403': { $ref: '#/components/responses/Error' }
+        '404': { $ref: '#/components/responses/Error' }
+components:
+  securitySchemes:
+    session:
+      type: apiKey
+      in: cookie
+      name: JSESSIONID
+  parameters:
+    Csrf:
+      name: X-CSRF-TOKEN
+      in: header
+      required: true
+      schema: { type: string }
+    Id:
+      name: id
+      in: path
+      required: true
+      schema: { type: string, format: uuid }
+    Page:
+      name: page
+      in: query
+      schema: { type: integer, minimum: 0, default: 0 }
+    Size:
+      name: size
+      in: query
+      schema: { type: integer, minimum: 1, maximum: 100, default: 20 }
+  responses:
+    Error:
+      description: Erro padronizado
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/ApiError' }
+  schemas:
+    ApiError:
+      type: object
+      required: [code, message, details, requestId]
+      properties:
+        code:
+          type: string
+          enum: [MALFORMED_REQUEST, VALIDATION_FAILED, UNAUTHENTICATED, INVALID_CREDENTIALS, FORBIDDEN,
+                 CSRF_INVALID, NOT_FOUND, METHOD_NOT_ALLOWED, VERSION_CONFLICT, CONFLICT, DUPLICATE_NAME,
+                 EMAIL_UNAVAILABLE, LAST_ADMIN, UNSUPPORTED_MEDIA_TYPE, TOO_MANY_ATTEMPTS, INTERNAL_ERROR]
+        message: { type: string }
+        details:
+          type: array
+          items:
+            type: object
+            properties:
+              field: { type: [string, 'null'] }
+              row: { type: [integer, 'null'] }
+              message: { type: string }
+        requestId: { type: [string, 'null'] }
+    CsrfToken:
+      type: object
+      properties:
+        headerName: { type: string, example: X-CSRF-TOKEN }
+        token: { type: string }
+    Role: { type: string, enum: [ADMIN, MEMBER] }
+    MemberStatus: { type: string, enum: [ACTIVE, DISABLED] }
+    AccountKind: { type: string, enum: [CASH, CARD] }
+    AccountStatus: { type: string, enum: [ACTIVE, ARCHIVED] }
+    Me:
+      type: object
+      properties:
+        userId: { type: string, format: uuid }
+        email: { type: string }
+        displayName: { type: string }
+        role: { $ref: '#/components/schemas/Role' }
+        family:
+          type: object
+          properties:
+            id: { type: string, format: uuid }
+            name: { type: string }
+    LoginResponse:
+      type: object
+      properties:
+        user: { $ref: '#/components/schemas/Me' }
+        csrf: { $ref: '#/components/schemas/CsrfToken' }
+    Settings:
+      type: object
+      properties:
+        currency: { type: string, const: BRL }
+        timezone: { type: string, example: America/Fortaleza }
+        averageWindowMonths: { type: integer, minimum: 1, maximum: 12 }
+        prudentMarginPercent: { type: string, pattern: '^\d{1,3}\.\d{2}$', example: '10.00' }
+        cardPaymentOffsetMonths: { type: integer, minimum: 0, maximum: 3 }
+        version: { type: integer, format: int64 }
+    SettingsPatch:
+      type: object
+      additionalProperties: false
+      required: [version]
+      properties:
+        timezone: { type: string }
+        averageWindowMonths: { type: integer, minimum: 1, maximum: 12 }
+        prudentMarginPercent: { type: string, pattern: '^\d{1,3}(\.\d{1,2})?$' }
+        cardPaymentOffsetMonths: { type: integer, minimum: 0, maximum: 3 }
+        version: { type: integer, format: int64 }
+    Account:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        name: { type: string }
+        kind: { $ref: '#/components/schemas/AccountKind' }
+        status: { $ref: '#/components/schemas/AccountStatus' }
+        createdAt: { type: string, format: date-time }
+        version: { type: integer, format: int64 }
+    Member:
+      type: object
+      properties:
+        id: { type: string, format: uuid, description: Identificador da associação }
+        userId: { type: string, format: uuid }
+        email: { type: string }
+        displayName: { type: string }
+        role: { $ref: '#/components/schemas/Role' }
+        status: { $ref: '#/components/schemas/MemberStatus' }
+        createdAt: { type: string, format: date-time }
+        version: { type: integer, format: int64 }
+    PageInfo:
+      type: object
+      properties:
+        page: { type: integer }
+        size: { type: integer }
+        totalItems: { type: integer, format: int64 }
+        totalPages: { type: integer }
+    AccountPage:
+      allOf:
+        - $ref: '#/components/schemas/PageInfo'
+        - type: object
+          properties:
+            items:
+              type: array
+              items: { $ref: '#/components/schemas/Account' }
+    MemberPage:
+      allOf:
+        - $ref: '#/components/schemas/PageInfo'
+        - type: object
+          properties:
+            items:
+              type: array
+              items: { $ref: '#/components/schemas/Member' }

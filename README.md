@@ -9,12 +9,15 @@ mantenedor.
 
 ## Estado atual
 
-**Etapa 1 — Fundação** (seção 17 da especificação) concluída: monorepositório, versões fixadas,
-Docker Compose, Flyway com migração de linha de base, health check restrito, tratamento de erros
-JSON, entrega da SPA pelo Spring Boot e CI.
+- **Etapa 1 — Fundação:** monorepositório, versões fixadas, Docker Compose, Flyway, health check
+  restrito, erros JSON, SPA servida pelo Spring Boot e CI.
+- **Etapa 2 — Acesso:** usuários, famílias, associações ADMIN/MEMBER, configurações da família,
+  contas de caixa e cartões, login com sessão no servidor, CSRF, limite de tentativas, revogação
+  de sessões, isolamento entre famílias, auditoria e comando administrativo de criação de família.
+  Decisões em [docs/adr/0002-acesso.md](docs/adr/0002-acesso.md); contrato em
+  [docs/api/openapi.yaml](docs/api/openapi.yaml).
 
-Ainda **não** existem login, famílias, importação de CSV, classificação, compromissos nem previsão
-(etapas 2 a 8). Toda a API (`/api/**`) responde `401` por padrão até a Etapa 2.
+Ainda **não** existem importação de CSV, classificação, compromissos nem previsão (etapas 3 a 8).
 
 ## Stack e versões fixadas
 
@@ -88,6 +91,35 @@ docker compose down
 
 Para apagar também o volume do banco: `docker compose down -v` (destrói os dados locais).
 
+## Criar a família e o primeiro administrador
+
+Não há cadastro público. A família e o primeiro administrador são criados por um comando
+administrativo da própria aplicação, executado sem servidor web. A senha **nunca** é passada como
+argumento: vem da variável `ADMIN_PASSWORD` ou é digitada no terminal (mínimo de 12 caracteres).
+
+```bash
+docker compose up -d db
+docker compose run --rm app --spring.main.web-application-type=none --admin.command=create-family "--admin.family-name=Família Exemplo" --admin.email=admin@exemplo.test "--admin.display-name=Administrador"
+```
+
+Fora do Docker, a partir de `backend/` (com o `.env` configurado), o equivalente é
+`./mvnw spring-boot:run -Dspring-boot.run.arguments="--spring.main.web-application-type=none --admin.command=create-family ..."`.
+
+Depois de entrar, o administrador cadastra os demais membros em **Membros** (com senha inicial,
+comunicada por canal seguro). Membros gerenciam as finanças, mas não administram acessos.
+
+### Recuperação administrativa de acesso
+
+Se o administrador perder a senha ou for desativado, quem tem acesso ao servidor executa:
+
+```bash
+docker compose run --rm app --spring.main.web-application-type=none --admin.command=recover-access --admin.email=admin@exemplo.test
+```
+
+O comando redefine a senha (pedida no terminal ou lida de `ADMIN_PASSWORD`), reativa o usuário e
+a associação, garante o papel de administrador e revoga as sessões abertas desse usuário. O evento
+fica registrado na auditoria.
+
 ## Desenvolvimento
 
 1. Banco:
@@ -138,7 +170,9 @@ cd frontend && npm run lint && npm run typecheck && npm test && npm run build
 | `GET /actuator/health` | Público | Apenas `status` (sem detalhes nem componentes) |
 | `GET /actuator/health/liveness`, `/readiness` | Público | Sondas para orquestração e `HEALTHCHECK` |
 | Demais `/actuator/**` | Negado | Não expostos |
-| `/api/**` | Autenticado | Na Etapa 1, sempre `401` (não há login ainda) |
+| `GET /api/v1/auth/csrf`, `POST /api/v1/auth/login`, `POST /api/v1/auth/logout` | Público (CSRF obrigatório nos POST) | Sessão |
+| `/api/v1/members/**` | ADMIN | Administração de membros |
+| Demais `/api/**` | Autenticado | Ver [docs/api/openapi.yaml](docs/api/openapi.yaml) |
 | Demais `GET` | Público | Arquivos da SPA; rotas sem extensão devolvem `index.html` |
 
 Erros da API seguem o formato `{"code", "message", "details", "requestId"}`; rotas `/api`
@@ -151,7 +185,17 @@ inexistentes respondem JSON `404`, nunca o HTML da SPA. Todo response traz `X-Re
   aplicação encerra as sessões e exige novo login. Não há Redis por decisão da especificação.
 - **Cookie de sessão:** `HttpOnly`, `SameSite=Lax`, `Secure` controlado por
   `SESSION_COOKIE_SECURE` (padrão `true`; use `false` apenas em `http://localhost`).
-- **CSRF** ativo em toda operação mutável. O fluxo de token para a SPA entra na Etapa 2.
+- **CSRF** ativo em toda operação mutável, inclusive login e logout. O token fica na sessão do
+  servidor, é obtido em `GET /api/v1/auth/csrf` e enviado no cabeçalho `X-CSRF-TOKEN`; é renovado
+  no login (devolvido no corpo da resposta) e após o logout.
+- **Login:** troca o identificador de sessão; falhas têm mensagem genérica. Após 5 falhas por
+  e-mail (ou 30 por IP) em 15 minutos, o login fica bloqueado até a janela expirar (HTTP 429).
+  Os contadores ficam em memória e zeram ao reiniciar. Ajustáveis por
+  `app.security.login.max-failures-per-email`, `max-failures-per-ip` e `window`.
+- **Revogação imediata:** desativar um membro, redefinir a senha dele ou ele trocar a própria
+  senha encerra as outras sessões na próxima requisição; mudança de papel vale na hora.
+- **Isolamento:** a família vem sempre da sessão. Recursos de outra família respondem 404;
+  campos JSON desconhecidos (como `familyId`) são rejeitados com 400.
 - **HTTPS** termina no serviço de hospedagem ou proxy; o contêiner escuta HTTP na porta 8080.
 
 ## Solução de problemas
@@ -164,10 +208,16 @@ inexistentes respondem JSON `404`, nunca o HTML da SPA. Todo response traz `X-Re
 
 ## Limitações e próximos passos
 
-- Etapas 2 a 8 pendentes (ver seção 17 da especificação).
+- Etapas 3 a 8 pendentes (ver seção 17 da especificação).
+- **Cada usuário (e-mail) pertence a exatamente uma família** no MVP, imposto no banco. Quem
+  participa de duas famílias precisa de dois e-mails. Motivos e caminho de evolução em
+  [docs/adr/0002-acesso.md](docs/adr/0002-acesso.md#decisão-explícita-cada-usuário-pertence-a-exatamente-uma-família).
+- Não há tela de consulta da auditoria nem recuperação de senha por e-mail (recuperação é
+  administrativa).
 - Backup/restauração, implantação, separação de credenciais de migração e revisão de segurança:
   Etapa 8 ([infra/](infra/README.md)).
-- Contrato OpenAPI: será publicado em `docs/` junto com os primeiros endpoints (Etapa 2).
+- Proxy reverso: para o limite por IP usar o IP real do cliente, configure
+  `server.forward-headers-strategy` na implantação (Etapa 8).
 
 ## Licença
 

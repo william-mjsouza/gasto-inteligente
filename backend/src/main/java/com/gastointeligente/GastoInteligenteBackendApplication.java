@@ -2,15 +2,12 @@ package com.gastointeligente;
 
 import org.springframework.boot.SpringApplication;
 import org.springframework.boot.autoconfigure.SpringBootApplication;
-import org.springframework.boot.security.autoconfigure.UserDetailsServiceAutoConfiguration;
 
 /**
- * Ponto de entrada do monólito.
- *
- * <p>{@link UserDetailsServiceAutoConfiguration} é excluída para impedir que o Spring Boot
- * crie um usuário padrão com senha gerada. Usuários reais e login com sessão entram na Etapa 2.
+ * Ponto de entrada do monólito. Usuários vêm exclusivamente do banco
+ * ({@code AppUserDetailsService}); não existe usuário padrão nem senha gerada.
  */
-@SpringBootApplication(exclude = UserDetailsServiceAutoConfiguration.class)
+@SpringBootApplication
 public class GastoInteligenteBackendApplication {
 
 	public static void main(String[] args) {

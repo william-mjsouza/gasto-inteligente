@@ -6,13 +6,19 @@ import jakarta.servlet.http.HttpServletRequest;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.http.ResponseEntity;
 import org.springframework.http.converter.HttpMessageNotReadableException;
+import org.springframework.orm.ObjectOptimisticLockingFailureException;
+import org.springframework.security.access.AccessDeniedException;
+import org.springframework.security.core.AuthenticationException;
 import org.springframework.web.HttpMediaTypeNotSupportedException;
 import org.springframework.web.HttpRequestMethodNotSupportedException;
 import org.springframework.web.bind.MethodArgumentNotValidException;
+import org.springframework.web.bind.MissingServletRequestParameterException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
+import org.springframework.web.method.annotation.HandlerMethodValidationException;
 import org.springframework.web.method.annotation.MethodArgumentTypeMismatchException;
 import org.springframework.web.servlet.resource.NoResourceFoundException;
 
@@ -24,6 +30,32 @@ import org.springframework.web.servlet.resource.NoResourceFoundException;
 public class GlobalExceptionHandler {
 
 	private static final Logger log = LoggerFactory.getLogger(GlobalExceptionHandler.class);
+
+	@ExceptionHandler(ApiException.class)
+	ResponseEntity<ApiError> api(HttpServletRequest request, ApiException ex) {
+		return respond(request, ex.code(), ex.details());
+	}
+
+	@ExceptionHandler(ObjectOptimisticLockingFailureException.class)
+	ResponseEntity<ApiError> optimisticLock(HttpServletRequest request) {
+		return respond(request, ApiErrorCode.VERSION_CONFLICT, List.of());
+	}
+
+	/** Violação de restrição do banco (por exemplo, unicidade sob concorrência). Sem detalhes do SQL. */
+	@ExceptionHandler(DataIntegrityViolationException.class)
+	ResponseEntity<ApiError> integrity(HttpServletRequest request) {
+		return respond(request, ApiErrorCode.CONFLICT, List.of());
+	}
+
+	@ExceptionHandler(AccessDeniedException.class)
+	ResponseEntity<ApiError> accessDenied(HttpServletRequest request) {
+		return respond(request, ApiErrorCode.FORBIDDEN, List.of());
+	}
+
+	@ExceptionHandler(AuthenticationException.class)
+	ResponseEntity<ApiError> unauthenticated(HttpServletRequest request) {
+		return respond(request, ApiErrorCode.UNAUTHENTICATED, List.of());
+	}
 
 	@ExceptionHandler(NoResourceFoundException.class)
 	ResponseEntity<ApiError> notFound(HttpServletRequest request) {
@@ -45,12 +77,30 @@ public class GlobalExceptionHandler {
 		return respond(request, ApiErrorCode.MALFORMED_REQUEST, List.of());
 	}
 
+	@ExceptionHandler(MissingServletRequestParameterException.class)
+	ResponseEntity<ApiError> missingParameter(HttpServletRequest request, MissingServletRequestParameterException ex) {
+		return respond(request, ApiErrorCode.VALIDATION_FAILED,
+				List.of(new ApiError.Detail(ex.getParameterName(), null, "Obrigatório.")));
+	}
+
 	@ExceptionHandler(MethodArgumentNotValidException.class)
 	ResponseEntity<ApiError> validation(HttpServletRequest request, MethodArgumentNotValidException ex) {
 		List<ApiError.Detail> details = ex.getBindingResult()
 			.getFieldErrors()
 			.stream()
 			.map((error) -> new ApiError.Detail(error.getField(), null, error.getDefaultMessage()))
+			.toList();
+		return respond(request, ApiErrorCode.VALIDATION_FAILED, details);
+	}
+
+	@ExceptionHandler(HandlerMethodValidationException.class)
+	ResponseEntity<ApiError> methodValidation(HttpServletRequest request, HandlerMethodValidationException ex) {
+		List<ApiError.Detail> details = ex.getParameterValidationResults()
+			.stream()
+			.flatMap((result) -> result.getResolvableErrors()
+				.stream()
+				.map((error) -> new ApiError.Detail(result.getMethodParameter().getParameterName(), null,
+						error.getDefaultMessage())))
 			.toList();
 		return respond(request, ApiErrorCode.VALIDATION_FAILED, details);
 	}

@@ -6,10 +6,11 @@ spring:
   config:
     import: optional:file:../.env[.properties]
   datasource:
-    url: jdbc:postgresql://${DB_HOST:localhost}:${DB_PORT:5432}/${POSTGRES_DB:gasto_inteligente}
-    username: ${POSTGRES_USER:gasto}
+    # DB_* permitem usar um PostgreSQL próprio (fora do Compose); sem eles, valem os POSTGRES_*.
+    url: jdbc:postgresql://${DB_HOST:localhost}:${DB_PORT:5432}/${DB_NAME:${POSTGRES_DB:gasto_inteligente}}
+    username: ${DB_USERNAME:${POSTGRES_USER:gasto}}
     # Sem valor padrão de propósito: a senha deve vir do ambiente.
-    password: ${POSTGRES_PASSWORD}
+    password: ${DB_PASSWORD:${POSTGRES_PASSWORD}}
   jpa:
     open-in-view: false
     hibernate:
@@ -26,6 +27,9 @@ spring:
     clean-disabled: true
   jackson:
     time-zone: UTC
+    deserialization:
+      # Campos inesperados (por exemplo, familyId) são rejeitados com 400.
+      fail-on-unknown-properties: true
 
 server:
   port: ${SERVER_PORT:8080}

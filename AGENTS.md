@@ -9,8 +9,8 @@ nomes sintéticos.
 
 ## Estado e escopo
 
-- Etapa concluída: **1 — Fundação**. Implemente uma etapa por vez, na ordem da seção 17, somente
-  após aprovação humana da etapa anterior.
+- Etapas concluídas: **1 — Fundação** e **2 — Acesso** (esta aguardando aprovação). Implemente
+  uma etapa por vez, na ordem da seção 17, somente após aprovação humana da etapa anterior.
 - Não antecipe funcionalidades de etapas futuras. Não mude a arquitetura (monólito Spring Boot +
   PostgreSQL + React) nem acrescente microserviços, mensageria ou LLM ao produto.
 
@@ -26,6 +26,7 @@ nomes sintéticos.
 | Frontend: instalar | `cd frontend && npm ci` |
 | Frontend: validar | `cd frontend && npm run lint && npm run typecheck && npm test && npm run build` |
 | Frontend: executar | `cd frontend && npm run dev` |
+| Criar família + admin | `docker compose run --rm app --spring.main.web-application-type=none --admin.command=create-family ...` (ver README) |
 
 ## Invariantes que não podem ser quebrados
 
@@ -38,6 +39,8 @@ nomes sintéticos.
   versionada; crie `V{n+1}__descricao.sql`.
 - **Banco de testes:** PostgreSQL real via Testcontainers, mesma imagem de `compose.yaml`
   (`postgres.image` no `pom.xml`). **Nunca H2.**
+- **Uma família por usuário:** decisão do MVP (ADR 0002), imposta por `UNIQUE (user_id)` em
+  `family_membership`. Não introduza seleção de família sem nova decisão aprovada.
 - **Isolamento:** `familyId` vem do contexto autenticado no servidor, nunca do cliente. Valide a
   família de todo ID relacionado em escritas e lotes.
 - **Segurança:** não desative CSRF, validação, autorização ou testes para contornar erros.
@@ -71,6 +74,16 @@ nomes sintéticos.
   implementação. Ao corrigir erro de cálculo, adicione caso de regressão que falharia antes.
 - Relate exatamente o que foi executado e o que não foi verificado. Mock não prova integração com
   banco, navegador ou implantação. Revisão por outro agente é complementar, não prova de segurança.
+
+## Acesso e testes de segurança
+
+- Todo endpoint novo de dados da família: buscar por `id` **e** `familyId` do principal
+  (`CurrentUser.get().familyId()`), responder 404 para outra família, e incluir teste de
+  isolamento em `FamilyIsolationIntegrationTests` (ou equivalente) com o cliente `Browser`.
+- Operações mutáveis: teste sem CSRF (403) e com versão desatualizada (409) quando editável.
+- Tabelas novas da família: `family_id NOT NULL` e chave estrangeira composta
+  `(family_id, <ref>_id)` referenciando `UNIQUE (family_id, id)` da tabela alvo.
+- Nunca registrar senha, hash, token ou cookie em logs ou em `audit_event.details`.
 
 ## Organização do backend
 
