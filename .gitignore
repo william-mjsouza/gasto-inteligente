@@ -1,0 +1,44 @@
+# --- Segredos e configuração local ---
+.env
+.env.*
+!.env.example
+
+# --- Dados reais e privados (seção 14): nunca versionar ---
+# Use private/ para CSVs familiares, PDFs, dumps e backups locais.
+private/*
+!private/README.md
+*.dump
+*.backup
+*.sql.gz
+*.pgdump
+
+# --- Backend (Maven) ---
+backend/target/
+backend/.mvn/wrapper/maven-wrapper.jar
+# Build do frontend copiado na imagem de distribuição; não versionar.
+backend/src/main/resources/static/
+
+# --- Frontend (Node/Vite) ---
+frontend/node_modules/
+frontend/dist/
+frontend/coverage/
+frontend/test-results/
+frontend/playwright-report/
+frontend/*.tsbuildinfo
+npm-debug.log*
+
+# --- IDEs e SO ---
+.idea/
+*.iml
+*.iws
+*.ipr
+.vscode/
+.settings/
+.project
+.classpath
+.factorypath
+.DS_Store
+Thumbs.db
+
+# --- Logs ---
+*.log

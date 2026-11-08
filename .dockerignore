@@ -1,0 +1,16 @@
+**/.git
+**/node_modules
+**/target
+**/dist
+**/coverage
+**/.env
+**/.env.*
+!**/.env.example
+private/
+docs/
+fixtures/
+infra/
+.github/
+**/*.log
+**/.idea
+**/.vscode

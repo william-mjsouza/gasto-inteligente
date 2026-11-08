@@ -1,0 +1,67 @@
+# Configuração base. Credenciais vêm de variáveis de ambiente (ver .env.example na raiz).
+# Ao executar a partir de backend/, o arquivo ../.env é lido se existir (formato chave=valor).
+spring:
+  application:
+    name: gasto-inteligente-backend
+  config:
+    import: optional:file:../.env[.properties]
+  datasource:
+    url: jdbc:postgresql://${DB_HOST:localhost}:${DB_PORT:5432}/${POSTGRES_DB:gasto_inteligente}
+    username: ${POSTGRES_USER:gasto}
+    # Sem valor padrão de propósito: a senha deve vir do ambiente.
+    password: ${POSTGRES_PASSWORD}
+  jpa:
+    open-in-view: false
+    hibernate:
+      # Flyway é o único mecanismo de alteração do esquema.
+      ddl-auto: validate
+    properties:
+      hibernate:
+        jdbc:
+          time_zone: UTC
+  flyway:
+    enabled: true
+    locations: classpath:db/migration
+    validate-on-migrate: true
+    clean-disabled: true
+  jackson:
+    time-zone: UTC
+
+server:
+  port: ${SERVER_PORT:8080}
+  shutdown: graceful
+  error:
+    include-stacktrace: never
+    include-message: never
+    include-binding-errors: never
+    include-exception: false
+  servlet:
+    session:
+      # Sessões em memória (instância única do MVP); reiniciar a aplicação encerra sessões.
+      timeout: ${SESSION_TIMEOUT:30m}
+      cookie:
+        http-only: true
+        secure: ${SESSION_COOKIE_SECURE:true}
+        same-site: lax
+
+management:
+  endpoints:
+    access:
+      default: none
+    web:
+      exposure:
+        include: health
+  endpoint:
+    health:
+      access: read-only
+      show-details: never
+      show-components: never
+      probes:
+        enabled: true
+  info:
+    env:
+      enabled: false
+
+logging:
+  pattern:
+    correlation: "[%X{requestId:-}] "
